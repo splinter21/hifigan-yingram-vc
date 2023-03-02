@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
+import tqdm
 from fastprogress.fastprogress import master_bar, progress_bar
 from torch import Tensor
 
@@ -18,18 +19,13 @@ from hubconf import wavlm_large
 
 DOWNSAMPLE_FACTOR = 320
 
-global feature_cache
 feature_cache = {}
-global synthesis_cache
 synthesis_cache = {}
 
 def make_librispeech_df(root_path: Path) -> pd.DataFrame:
     all_files = []
-    folders = ['train-clean-100', 'dev-clean']
-    print(f"[LIBRISPEECH] Computing folders {folders}")
-    for f in folders:
-        all_files.extend(list((root_path/f).rglob('**/*.flac')))
-    speakers = ['ls-' + f.stem.split('-')[0] for f in all_files]
+    all_files.extend(list((root_path).rglob('*.wav')))
+    speakers = [None for f in all_files]
     df = pd.DataFrame({'path': all_files, 'speaker': speakers})
     return df
 
@@ -53,12 +49,14 @@ def main(args):
 
 def path2pools(path: Path, wavlm: nn.Module(), match_weights: Tensor, synth_weights: Tensor, device):
     """Given a waveform `path`, compute the matching pool"""
+    global feature_cache
+    global synthesis_cache
 
-    uttrs_from_same_spk = sorted(list(path.parent.rglob('**/*.flac')))
+    uttrs_from_same_spk = sorted(list(path.parent.rglob('*.wav')))
     uttrs_from_same_spk.remove(path)
     matching_pool = []
     synth_pool = []
-    for pth in uttrs_from_same_spk:
+    for pth in tqdm.tqdm(uttrs_from_same_spk):
         if pth in feature_cache and pth in synthesis_cache:
             matching_feats = feature_cache[pth].float() # (seq_len, dim)
             synth_feats = synthesis_cache[pth].float() # (seq_len, dim)
@@ -108,9 +106,8 @@ def fast_cosine_dist(source_feats, matching_pool):
 @torch.inference_mode()
 def extract(df: pd.DataFrame, wavlm: nn.Module, device, ls_path: Path, out_path: Path, synth_weights: Tensor, match_weights: Tensor):
     
-    if args.fast_l2: pb = progress_bar(df.iterrows(), total=len(df))
-    else: pb = master_bar(df.iterrows(), total=len(df))
-
+    pb = progress_bar(df.iterrows(), total=len(df))
+    # print(pb.wait_for)
     for i, row in pb:
         rel_path = Path(row.path).relative_to(ls_path)
         targ_path = (out_path/rel_path).with_suffix('.pt')
@@ -125,11 +122,11 @@ def extract(df: pd.DataFrame, wavlm: nn.Module, device, ls_path: Path, out_path:
             source_feats = get_full_features(row.path, wavlm, device)
             source_feats = ( source_feats*match_weights[:, None] ).sum(dim=0) # (seq_len, dim)
 
-        matching_pool, synth_pool = path2pools(row.path, wavlm, match_weights, synth_weights, device)
 
-        if args.prematch:
+        if not args.prematch:
             out_feats = source_feats.cpu()
         else:
+            matching_pool, synth_pool = path2pools(row.path, wavlm, match_weights, synth_weights, device)
             dists = fast_cosine_dist(source_feats.cpu(), matching_pool.cpu()).cpu()
             best = dists.topk(k=args.topk, dim=-1, largest=False) # (src_len, 4)
             out_feats = synth_pool[best.indices].mean(dim=1) # (N, dim)
@@ -138,19 +135,17 @@ def extract(df: pd.DataFrame, wavlm: nn.Module, device, ls_path: Path, out_path:
         if i < 3: print("Feature has shape: ", out_feats.shape, flush=True)
         # 3. save
         torch.save(out_feats.cpu().half(), str(targ_path))
-        if hasattr(pb, 'child'):
-            pb.child.comment = str(rel_path)
-            pb.child.wait_for = min(pb.child.wait_for, 10)
-            pb.main_bar.comment = str(rel_path)
-        else:
-            pb.wait_for = min(pb.wait_for, 10)
-        pb.comment = str(rel_path)
-        
+        # if hasattr(pb, 'child'):
+        #     pb.child.comment = str(rel_path)
+        #     pb.child.wait_for = min(pb.child.wait_for, 10)
+        #     pb.main_bar.comment = str(rel_path)
+        # else:
+        #     pb.wait_for = min(pb.wait_for, 10)
+        # pb.comment = str(rel_path)
+        #
 
         if i % 1000 == 0: 
             print(f"Done {i:,d}/{len(df):,d}", flush=True)
-            feature_cache.clear()
-            synthesis_cache.clear()
             gc.collect()
             time.sleep(4)
 

@@ -1,5 +1,5 @@
-python -m hifigan.train --audio_root_path ./dataset_raw \
---feature_root_path ./dataset \
+python -m hifigan.train --audio_root_path ./dataset/32k \
+--feature_root_path ./dataset/features \
 --input_training_file data_splits/wavlm-hifigan-train.csv \
 --input_validation_file data_splits/wavlm-hifigan-valid.csv \
 --checkpoint_path ./checkpoints \

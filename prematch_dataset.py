@@ -15,6 +15,7 @@ import tqdm
 from fastprogress.fastprogress import master_bar, progress_bar
 from torch import Tensor
 
+import yingram
 from hubconf import wavlm_large
 
 DOWNSAMPLE_FACTOR = 320
@@ -77,7 +78,7 @@ def path2pools(path: Path, wavlm: nn.Module(), match_weights: Tensor, synth_weig
 @torch.inference_mode()
 def get_full_features(path, wavlm, device):
 
-    x, sr = torchaudio.load(path)
+    x, sr = torchaudio.load(path.parent.parent/ "16k" / path.name)
     assert sr == 16000
     # This does not work i.t.o the hifigan training.
     # x = F.pad(x, (DOWNSAMPLE_FACTOR//2, DOWNSAMPLE_FACTOR - DOWNSAMPLE_FACTOR//2), value=0)
@@ -122,14 +123,21 @@ def extract(df: pd.DataFrame, wavlm: nn.Module, device, ls_path: Path, out_path:
             source_feats = get_full_features(row.path, wavlm, device)
             source_feats = ( source_feats*match_weights[:, None] ).sum(dim=0) # (seq_len, dim)
 
+        out_feats = source_feats.cpu()
 
-        if not args.prematch:
-            out_feats = source_feats.cpu()
-        else:
-            matching_pool, synth_pool = path2pools(row.path, wavlm, match_weights, synth_weights, device)
-            dists = fast_cosine_dist(source_feats.cpu(), matching_pool.cpu()).cpu()
-            best = dists.topk(k=args.topk, dim=-1, largest=False) # (src_len, 4)
-            out_feats = synth_pool[best.indices].mean(dim=1) # (N, dim)
+        gram = yingram.calc_yingram(row.path)
+        assert abs(out_feats.shape[0]- gram.shape[0])<3
+        l = min(out_feats.shape[0], gram.shape[0])
+        out_feats = out_feats[:l, :]
+        gram = gram[:l, :]
+        out_feats = torch.cat((out_feats, gram), dim=1)
+        print(out_feats.shape)
+        # if not args.prematch:
+        # else:
+        #     matching_pool, synth_pool = path2pools(row.path, wavlm, match_weights, synth_weights, device)
+        #     dists = fast_cosine_dist(source_feats.cpu(), matching_pool.cpu()).cpu()
+        #     best = dists.topk(k=args.topk, dim=-1, largest=False) # (src_len, 4)
+        #     out_feats = synth_pool[best.indices].mean(dim=1) # (N, dim)
 
         # save matched sequence
         if i < 3: print("Feature has shape: ", out_feats.shape, flush=True)
@@ -146,17 +154,17 @@ def extract(df: pd.DataFrame, wavlm: nn.Module, device, ls_path: Path, out_path:
 
         if i % 1000 == 0: 
             print(f"Done {i:,d}/{len(df):,d}", flush=True)
-            gc.collect()
-            time.sleep(4)
+            # gc.collect()
+            # time.sleep(4)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Compute matched wavlm features for a librispeech dataset")
 
-    parser.add_argument('--librispeech_path', required=True, type=str)
+    parser.add_argument('--librispeech_path', default="dataset/32k", type=str)
     parser.add_argument('--seed', default=123, type=int)
-    parser.add_argument('--out_path', required=True, type=str)
-    parser.add_argument('--device', default='cuda', type=str)
+    parser.add_argument('--out_path', default="dataset/features", type=str)
+    parser.add_argument('--device', default='cpu', type=str)
     parser.add_argument('--topk', type=int, default=4)
     parser.add_argument('--matching_layer', type=int, default=6)
     parser.add_argument('--synthesis_layer', type=int, default=6)

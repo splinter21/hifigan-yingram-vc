@@ -56,6 +56,7 @@ class Yingram(nn.Module):
         self.sr = sr
         # midi range
         self.mmin, self.mmax = Yingram.midi_range(sr, lmin, lmax)
+        print(21)
 
     @staticmethod
     def midi_range(sr: int, lmin: int, lmax: int) -> Tuple[int, int]:
@@ -124,15 +125,18 @@ class Yingram(nn.Module):
 
 # yingram
 yin_strides = 640  # targeting 50hz on 22050hz sr
-yin_windows = 2048
-yin_lmin = 22  # 1000.40hz, 83midi(floor)
-yin_lmax = 2047  # 10.77hz,  5midi(ceil), 79-channel yingram
+sr = 32000
+yin_windows = int(2048 *sr/22050)
+yin_lmin = int(sr/1000.40)  # 1000.40hz, 83midi(floor)
+yin_lmax = int(sr/10.77)  # 10.77hz,  5midi(ceil), 79-channel yingram
+
+# yin_lmin = 22  # 1000.40hz, 83midi(floor)
+# yin_lmax = 2047
 
 yin_hmin = 25.11  # 878 lag, 20midi, +15 from lmin
-yin_hmax = 430.19  # 51 lag, 68midi, 49-channel
+yin_hmax = 430.19 # 51 lag, 68midi, 49-channel
 
 yin_bins = 2  # the number of the bins per semitone
-sr = 32000
 
 yingram = Yingram(
     yin_strides,

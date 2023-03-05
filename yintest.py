@@ -19,10 +19,12 @@ def plot_yingram(path ,shift):
 
 
 
-plot_yingram("/Users/xingyijin/Documents/individualAudio.wav", 0)
-plot_yingram("kkk.wav", 0)
-plot_yingram("testwav.wav", 0)
-# plot_yingram("/Volumes/Extend/下载/yintest.flac", 11)
+# plot_yingram("/Users/xingyijin/Documents/individualAudio.wav", 0)
+# plot_yingram("kkk.wav", 0)
+# plot_yingram("kkk.wav", 9)
+# plot_yingram("testwav.wav", 0)
+plot_yingram("/Volumes/Extend/下载/yintest.flac", -15)
+plot_yingram("/Volumes/Extend/下载/yintest.flac", 0)
 # plot_yingram("/Volumes/Extend/下载/yintest-11.flac", 0)
 # plot_yingram("/Volumes/Extend/下载/yintest-11.flac", -11)
 

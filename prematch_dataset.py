@@ -131,7 +131,6 @@ def extract(df: pd.DataFrame, wavlm: nn.Module, device, ls_path: Path, out_path:
         out_feats = out_feats[:l, :]
         gram = gram[:l, :]
         out_feats = torch.cat((out_feats, gram), dim=1)
-        print(out_feats.shape)
         # if not args.prematch:
         # else:
         #     matching_pool, synth_pool = path2pools(row.path, wavlm, match_weights, synth_weights, device)
@@ -164,12 +163,12 @@ if __name__ == '__main__':
     parser.add_argument('--librispeech_path', default="dataset/32k", type=str)
     parser.add_argument('--seed', default=123, type=int)
     parser.add_argument('--out_path', default="dataset/features", type=str)
-    parser.add_argument('--device', default='cpu', type=str)
+    parser.add_argument('--device', default='cuda', type=str)
     parser.add_argument('--topk', type=int, default=4)
     parser.add_argument('--matching_layer', type=int, default=6)
     parser.add_argument('--synthesis_layer', type=int, default=6)
     parser.add_argument('--prematch', action='store_true', help='prematch')
-    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--resume', default=True)
 
     args = parser.parse_args()
     main(args)

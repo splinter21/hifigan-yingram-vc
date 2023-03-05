@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
 import torchaudio.transforms as T
+
+import yingram
 from hifigan.models import Generator as HiFiGAN
 from hifigan.utils import AttrDict
 from torch import Tensor
@@ -82,7 +84,7 @@ class KNN_VC(nn.Module):
 
 
     @torch.inference_mode()
-    def get_features(self, path, weights=None, vad_trigger_level=7):
+    def get_features(self, path, weights=None, vad_trigger_level=7, trim=False, shift=0):
         """Returns features of `path` waveform as a tensor of shape (seq_len, dim)"""
         # load audio
         if weights == None: weights = self.weighting
@@ -90,19 +92,23 @@ class KNN_VC(nn.Module):
             x, sr = torchaudio.load(path, normalize=True)
         else:
             x: Tensor = path
-            sr = self.sr
+            sr = 16000
             if x.dim() == 1: x = x[None]
-        assert sr == self.sr, "input audio sample rate must be 16kHz."
-        
-        # trim silence from front and back
-        transform = T.Vad(sample_rate=sr, trigger_level=vad_trigger_level)
-        x_front_trim = transform(x)
-        waveform_reversed, sr = apply_effects_tensor(x_front_trim, sr, [["reverse"]])
-        waveform_reversed_front_trim = transform(waveform_reversed)
-        waveform_end_trim, sr = apply_effects_tensor(
-            waveform_reversed_front_trim, sr, [["reverse"]]
-        )
-        x = waveform_end_trim
+        if sr != 16000:
+            resampler = torchaudio.transforms.Resample(sr, 16000)
+            x = resampler(x)
+            sr = 16000
+
+        if trim:
+            # trim silence from front and back
+            transform = T.Vad(sample_rate=sr, trigger_level=vad_trigger_level)
+            x_front_trim = transform(x)
+            waveform_reversed, sr = apply_effects_tensor(x_front_trim, sr, [["reverse"]])
+            waveform_reversed_front_trim = transform(waveform_reversed)
+            waveform_end_trim, sr = apply_effects_tensor(
+                waveform_reversed_front_trim, sr, [["reverse"]]
+            )
+            x = waveform_end_trim
         # extract the representation of each layer
         wav_input_16khz = x.to(self.device)
         rep, layer_results = self.wavlm.extract_features(wav_input_16khz, output_layer=self.wavlm.cfg.encoder_layers, ret_layer_results=True)[0]
@@ -110,6 +116,13 @@ class KNN_VC(nn.Module):
 
         # save full sequence
         features = ( features*weights[:, None] ).sum(dim=0) # (seq_len, dim)
+
+        gram = yingram.calc_yingram(path, shift).to(self.device)
+        assert abs(features.shape[0]- gram.shape[0])<3
+        l = min(features.shape[0], gram.shape[0])
+        features = features[:l, :]
+        gram = gram[:l, :]
+        features = torch.cat((features, gram), dim=1)
         return features
 
 
@@ -131,6 +144,7 @@ class KNN_VC(nn.Module):
         dists = fast_cosine_dist(query_seq.cpu(), matching_set.cpu())
         best = dists.topk(k=topk, largest=False, dim=-1)
         out_feats = synth_set[best.indices].mean(dim=1).cpu()
+        out_feats[:, -98:] = query_seq[:, -98:]
         
         prediction = self.vocode(out_feats[None].cuda()).cpu().squeeze()
         

@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import torch.utils.data
-import torchaudio
+# import torchaudio
 from librosa.filters import mel as librosa_mel_fn
 from librosa.util import normalize
 from scipy.io.wavfile import read
@@ -51,29 +51,65 @@ def spectral_de_normalize_torch(magnitudes):
 mel_basis = {}
 hann_window = {}
 
+def mel_spectrogram_torch(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False):
+    if torch.min(y) < -1.:
+        print('min value is ', torch.min(y))
+    if torch.max(y) > 1.:
+        print('max value is ', torch.max(y))
+
+    global mel_basis, hann_window
+    dtype_device = str(y.dtype) + '_' + str(y.device)
+    fmax_dtype_device = str(fmax) + '_' + dtype_device
+    wnsize_dtype_device = str(win_size) + '_' + dtype_device
+    if fmax_dtype_device not in mel_basis:
+        mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
+        mel_basis[fmax_dtype_device] = torch.from_numpy(mel).to(dtype=y.dtype, device=y.device)
+    if wnsize_dtype_device not in hann_window:
+        hann_window[wnsize_dtype_device] = torch.hann_window(win_size).to(dtype=y.dtype, device=y.device)
+
+    y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+    y = y.squeeze(1)
+
+    spec = torch.stft(y, n_fft, hop_length=hop_size, win_length=win_size, window=hann_window[wnsize_dtype_device],
+                      center=center, pad_mode='reflect', normalized=False, onesided=True, return_complex=False)
+
+    spec = torch.sqrt(spec.pow(2).sum(-1) + 1e-6)
+
+    spec = torch.matmul(mel_basis[fmax_dtype_device], spec)
+    spec = spectral_normalize_torch(spec)
+
+    return spec
+
 class LogMelSpectrogram(torch.nn.Module):
     def __init__(self, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False):
         super().__init__()
-        self.melspctrogram = torchaudio.transforms.MelSpectrogram(
-            sample_rate=sampling_rate,
-            n_fft=n_fft,
-            win_length=win_size,
-            hop_length=hop_size,
-            center=center,
-            power=1.0,
-            norm="slaney",
-            onesided=True,
-            n_mels=num_mels,
-            mel_scale="slaney",
-            f_min=fmin,
-            f_max=fmax
-        )
+        # self.melspctrogram = torchaudio.transforms.MelSpectrogram(
+        #     sample_rate=sampling_rate,
+        #     n_fft=n_fft,
+        #     win_length=win_size,
+        #     hop_length=hop_size,
+        #     center=center,
+        #     power=1.0,
+        #     norm="slaney",
+        #     onesided=True,
+        #     n_mels=num_mels,
+        #     mel_scale="slaney",
+        #     f_min=fmin,
+        #     f_max=fmax
+        # )
         self.n_fft = n_fft
         self.hop_size = hop_size
+        self.num_mels=num_mels
+        self.sampling_rate= sampling_rate
+        self.hop_size=hop_size
+        self.win_size = win_size
+        self.fmin=fmin
+        self.fmax=fmax
+        self.center=center
 
     def forward(self, wav):
         wav = F.pad(wav, ((self.n_fft - self.hop_size) // 2, (self.n_fft - self.hop_size) // 2), "reflect")
-        mel = self.melspctrogram(wav)
+        mel = mel_spectrogram_torch(wav, self.n_fft, self.num_mels,  self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax, self.center)
         logmel = torch.log(torch.clamp(mel, min=1e-5))
         return logmel
 

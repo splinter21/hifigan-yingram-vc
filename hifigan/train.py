@@ -23,7 +23,28 @@ from .utils import (AttrDict, build_env, load_checkpoint, plot_spectrogram,
                     save_checkpoint, scan_checkpoint)
 
 torch.backends.cudnn.benchmark = True
-USE_ALT_MELCALC = True
+USE_ALT_MELCALC = False
+
+def load_state_dict(model, saved_state_dict):
+    if hasattr(model, 'module'):
+        state_dict = model.module.state_dict()
+    else:
+        state_dict = model.state_dict()
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        try:
+            # assert "dec" in k or "disc" in k
+            # print("load", k)
+            new_state_dict[k] = saved_state_dict[k]
+            assert saved_state_dict[k].shape == v.shape, (saved_state_dict[k].shape, v.shape)
+        except:
+            print("error, %s is not in the checkpoint" % k)
+            new_state_dict[k] = v
+    if hasattr(model, 'module'):
+        model.module.load_state_dict(new_state_dict)
+    else:
+        model.load_state_dict(new_state_dict)
+
 
 
 def train(rank, a, h):
@@ -54,13 +75,14 @@ def train(rank, a, h):
     else:
         state_dict_g = load_checkpoint(cp_g, device)
         state_dict_do = load_checkpoint(cp_do, device)
-        generator.load_state_dict(state_dict_g['generator'])
+        load_state_dict(generator, state_dict_g['generator'])
         mpd.load_state_dict(state_dict_do['mpd'])
         msd.load_state_dict(state_dict_do['msd'])
         steps = state_dict_do['steps'] + 1
         last_epoch = state_dict_do['epoch']
         print(f"Restored checkpoint from {cp_g} and {cp_do}")
-
+    # state_dict_do = None
+    # last_epoch = -1
     if h.num_gpus > 1:
         print("Multi-gpu detected")
         generator = DistributedDataParallel(generator, device_ids=[rank]).to(device)
@@ -268,7 +290,7 @@ def train(rank, a, h):
                             if j <= 4:
                                 # if steps == 0:
                                 sw.add_audio('gt/y_{}'.format(j), y[0], steps, h.sampling_rate)
-                                sw.add_figure('gt/y_spec_{}'.format(j), plot_spectrogram(x[0]), steps)
+                                sw.add_figure('gt/y_spec_{}'.format(j), plot_spectrogram(y_mel.cpu()[0]), steps)
 
                                 sw.add_audio('generated/y_hat_{}'.format(j), y_g_hat[0], steps, h.sampling_rate)
                                 if USE_ALT_MELCALC:

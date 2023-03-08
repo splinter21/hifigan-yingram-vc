@@ -5,6 +5,7 @@ import sys
 import time
 from pathlib import Path
 
+import librosa
 import numpy as np
 import pandas as pd
 import torch
@@ -15,6 +16,7 @@ import tqdm
 from fastprogress.fastprogress import master_bar, progress_bar
 from torch import Tensor
 
+import hubconf
 import yingram
 from hubconf import wavlm_large
 
@@ -40,7 +42,7 @@ def main(args):
     ls_df = make_librispeech_df(Path(args.librispeech_path))
 
     print(f"Loading wavlm.")
-    wavlm = wavlm_large(pretrained=True, progress=True, device=args.device)
+    wavlm = hubconf.get_hubert_model().to(args.device)
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -48,50 +50,35 @@ def main(args):
     print("All done!", flush=True)
 
 
-def path2pools(path: Path, wavlm: nn.Module(), match_weights: Tensor, synth_weights: Tensor, device):
-    """Given a waveform `path`, compute the matching pool"""
-    global feature_cache
-    global synthesis_cache
-
-    uttrs_from_same_spk = sorted(list(path.parent.rglob('*.wav')))
-    uttrs_from_same_spk.remove(path)
-    matching_pool = []
-    synth_pool = []
-    for pth in tqdm.tqdm(uttrs_from_same_spk):
-        if pth in feature_cache and pth in synthesis_cache:
-            matching_feats = feature_cache[pth].float() # (seq_len, dim)
-            synth_feats = synthesis_cache[pth].float() # (seq_len, dim)
-        else:
-            feats = get_full_features(pth, wavlm, device)
-            matching_feats = ( feats*match_weights[:, None] ).sum(dim=0) # (seq_len, dim)
-            synth_feats = ( feats*synth_weights[:, None] ).sum(dim=0) # (seq_len, dim)
-            feature_cache[pth] = matching_feats.half().cpu()
-            synthesis_cache[pth] = synth_feats.half().cpu()
-
-        matching_pool.append(matching_feats.cpu())
-        synth_pool.append(synth_feats.cpu())
-    matching_pool = torch.concat(matching_pool, dim=0)
-    synth_pool = torch.concat(synth_pool, dim=0)
-    return matching_pool, synth_pool # (N, dim)
-
+def get_hubert_content(hmodel, wav_16k_tensor):
+    feats = wav_16k_tensor
+    if feats.dim() == 2:  # double channels
+        feats = feats.mean(-1)
+    assert feats.dim() == 1, feats.dim()
+    feats = feats.view(1, -1)
+    padding_mask = torch.BoolTensor(feats.shape).fill_(False)
+    inputs = {
+        "source": feats.to(wav_16k_tensor.device),
+        "padding_mask": padding_mask.to(wav_16k_tensor.device),
+        "output_layer": 9,  # layer 9
+    }
+    with torch.no_grad():
+        logits = hmodel.extract_features(**inputs)
+        feats = hmodel.final_proj(logits[0])
+    return feats.transpose(1, 2)
 
 @torch.inference_mode()
-def get_full_features(path, wavlm, device):
+def get_full_features(path, hmodel, device):
 
-    x, sr = torchaudio.load(path.parent.parent/ "16k" / path.name)
+    x, sr = librosa.load(path.parent.parent/ "16k" / path.name, sr=None)
+    x = torch.FloatTensor(x).to(device)
+
     assert sr == 16000
-    # This does not work i.t.o the hifigan training.
-    # x = F.pad(x, (DOWNSAMPLE_FACTOR//2, DOWNSAMPLE_FACTOR - DOWNSAMPLE_FACTOR//2), value=0)
-    # This does.
     n_pad = DOWNSAMPLE_FACTOR - (x.shape[-1] % DOWNSAMPLE_FACTOR)
     x = F.pad(x, (0, n_pad), value=0)
+    features = get_hubert_content(hmodel, x).transpose(1, 2)
 
-    # extract the representation of each layer
-    wav_input_16khz = x.to(device)
-    rep, layer_results = wavlm.extract_features(wav_input_16khz, output_layer=wavlm.cfg.encoder_layers, ret_layer_results=True)[0]
-    features = torch.cat([x.transpose(0, 1) for x, _ in layer_results], dim=0) # (n_layers, seq_len, dim)
-
-    return features
+    return features.squeeze(0)
 
 
 def fast_cosine_dist(source_feats, matching_pool):
@@ -117,11 +104,7 @@ def extract(df: pd.DataFrame, wavlm: nn.Module, device, ls_path: Path, out_path:
         # if targ_path.is_file(): continue
         os.makedirs(targ_path.parent, exist_ok=True)
 
-        if Path(row.path) in feature_cache:
-            source_feats = feature_cache[Path(row.path)].float()
-        else:
-            source_feats = get_full_features(row.path, wavlm, device)
-            source_feats = ( source_feats*match_weights[:, None] ).sum(dim=0) # (seq_len, dim)
+        source_feats = get_full_features(row.path, wavlm, device)
 
         out_feats = source_feats.cpu()
 

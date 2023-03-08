@@ -14,6 +14,20 @@ from hifigan.utils import AttrDict
 from matcher import KNN_VC
 
 
+def get_hubert_model():
+    vec_path = "hubert/checkpoint_best_legacy_500.pt"
+    print("load model(s) from {}".format(vec_path))
+    from fairseq import checkpoint_utils
+    models, saved_cfg, task = checkpoint_utils.load_model_ensemble_and_task(
+        [vec_path],
+        suffix="",
+    )
+    model = models[0]
+    model.eval()
+    return model
+
+
+
 def knn_vc(pretrained=True, progress=True, prematched=True, device='cuda', model_path=None) -> KNN_VC:
     """ Load kNN-VC (WavLM encoder and HiFiGAN decoder). Optionally use vocoder trained on `prematched` data. """
     hifigan, hifigan_cfg = hifigan_wavlm(pretrained, progress, prematched, device, model_path)

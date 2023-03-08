@@ -77,6 +77,8 @@ class Generator(torch.nn.Module):
         super(Generator, self).__init__()
         self.h = h
         self.lin_pre = nn.Linear(h.hubert_dim, h.hifi_dim)
+        self.ying_pre = nn.Linear(h.yingram_dim, h.hifi_dim)
+
         self.num_kernels = len(h.resblock_kernel_sizes)
         self.num_upsamples = len(h.upsample_rates)
         self.conv_pre = weight_norm(Conv1d(h.hifi_dim, h.upsample_initial_channel, 7, 1, padding=3))
@@ -101,7 +103,9 @@ class Generator(torch.nn.Module):
 
     def forward(self, x):
         """ `x` as (bs, seq_len, dim), regular hifi assumes input of shape (bs, n_mels, seq_len) """
-        x = self.lin_pre(x)
+        hubert_x = x[:, :, :self.h.hubert_dim]
+        yingram_x = x[:, :, self.h.hubert_dim:]
+        x = self.lin_pre(hubert_x) + self.ying_pre(yingram_x)
         x = x.permute(0, 2, 1) # (bs, seq_len, dim) --> (bs, dim, seq_len)
 
         x = self.conv_pre(x)

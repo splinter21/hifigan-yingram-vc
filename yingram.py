@@ -136,7 +136,7 @@ yin_lmax = int(sr/10.77)  # 10.77hz,  5midi(ceil), 79-channel yingram
 yin_hmin = 25.11  # 878 lag, 20midi, +15 from lmin
 yin_hmax = 430.19 # 51 lag, 68midi, 49-channel
 
-yin_bins = 2  # the number of the bins per semitone
+yin_bins = 5  # the number of the bins per semitone
 
 yingram = Yingram(
     yin_strides,

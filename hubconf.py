@@ -8,44 +8,34 @@ import logging
 import json
 from pathlib import Path
 
-
 from wavlm.WavLM import WavLM, WavLMConfig
 from hifigan.models import Generator as HiFiGAN
 from hifigan.utils import AttrDict
 from matcher import KNN_VC
 
 
-def knn_vc(pretrained=True, progress=True, prematched=True, device='cuda') -> KNN_VC:
+def knn_vc(pretrained=True, progress=True, prematched=True, device='cuda', model_path=None) -> KNN_VC:
     """ Load kNN-VC (WavLM encoder and HiFiGAN decoder). Optionally use vocoder trained on `prematched` data. """
-    hifigan, hifigan_cfg = hifigan_wavlm(pretrained, progress, prematched, device)
+    hifigan, hifigan_cfg = hifigan_wavlm(pretrained, progress, prematched, device, model_path)
     wavlm = wavlm_large(pretrained, progress, device)
     knnvc = KNN_VC(wavlm, hifigan, hifigan_cfg, device)
     return knnvc
 
 
-def hifigan_wavlm(pretrained=True, progress=True, prematched=True, device='cuda') -> HiFiGAN:
+def hifigan_wavlm(pretrained=True, progress=True, prematched=True, device='cuda', model_path=None) -> HiFiGAN:
     """ Load pretrained hifigan trained to vocode wavlm features. Optionally use weights trained on `prematched` data. """
     cp = Path(__file__).parent.absolute()
 
-    with open(cp/'hifigan'/'config_v1_wavlm.json') as f:
+    with open(cp / 'hifigan' / 'config_v1_wavlm.json') as f:
         data = f.read()
     json_config = json.loads(data)
     h = AttrDict(json_config)
     device = torch.device(device)
 
     generator = HiFiGAN(h).to(device)
-    
-    if pretrained:
-        if prematched:
-            url = "https://github.com/interspeech2023blind/knn-vc/releases/download/v0.1/prematch_g_02500000.pt"
-        else:
-            url = "https://github.com/interspeech2023blind/knn-vc/releases/download/v0.1/g_02500000.pt"
-        state_dict_g = torch.hub.load_state_dict_from_url(
-            url,
-            map_location=device,
-            progress=progress
-        )
-        generator.load_state_dict(state_dict_g['generator'])
+
+    state_dict_g = torch.load(model_path)
+    generator.load_state_dict(state_dict_g['generator'])
     generator.eval()
     generator.remove_weight_norm()
     print(f"[HiFiGAN] Generator loaded with {sum([p.numel() for p in generator.parameters()]):,d} parameters.")
@@ -59,11 +49,11 @@ def wavlm_large(pretrained=True, progress=True, device='cuda') -> WavLM:
             logging.warning(f"Overriding device {device} to cpu since no GPU is available.")
             device = 'cpu'
     checkpoint = torch.hub.load_state_dict_from_url(
-        "https://github.com/interspeech2023blind/knn-vc/releases/download/v0.1/WavLM-Large.pt", 
-        map_location=device, 
+        "https://huggingface.co/datasets/innnky/ft_vispeech/resolve/main/WavLM-Large.pt",
+        map_location=device,
         progress=progress
     )
-    
+
     cfg = WavLMConfig(checkpoint['cfg'])
     device = torch.device(device)
     model = WavLM(cfg)

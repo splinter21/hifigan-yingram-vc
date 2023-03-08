@@ -87,7 +87,7 @@ def train(rank, a, h):
                           h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=0,
                           shuffle=False if h.num_gpus > 1 else True, fmax_loss=h.fmax_for_loss, device=device,
                           fine_tuning=a.fine_tuning,
-                          audio_root_path=a.audio_root_path, feat_root_path=a.feature_root_path, 
+                          audio_root_path=a.audio_root_path, feat_root_path=a.feature_root_path,
                           use_alt_melcalc=USE_ALT_MELCALC)
 
     train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
@@ -98,13 +98,14 @@ def train(rank, a, h):
                               pin_memory=True,
                               drop_last=True)
 
-    alt_melspec = LogMelSpectrogram(h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size, h.fmin, h.fmax).to(device)
+    alt_melspec = LogMelSpectrogram(h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size, h.fmin, h.fmax).to(
+        device)
 
     if rank == 0:
         validset = MelDataset(valid_df, h.segment_size, h.n_fft, h.num_mels,
                               h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=0,
                               fmax_loss=h.fmax_for_loss, device=device, fine_tuning=a.fine_tuning,
-                              audio_root_path=a.audio_root_path, feat_root_path=a.feature_root_path, 
+                              audio_root_path=a.audio_root_path, feat_root_path=a.feature_root_path,
                               use_alt_melcalc=USE_ALT_MELCALC)
         validation_loader = DataLoader(validset, num_workers=1, shuffle=False,
                                        sampler=None,
@@ -117,21 +118,24 @@ def train(rank, a, h):
     generator.train()
     mpd.train()
     msd.train()
-    
-    if rank == 0: mb = master_bar(range(max(0, last_epoch), a.training_epochs))
-    else: mb = range(max(0, last_epoch), a.training_epochs)
+
+    if rank == 0:
+        mb = master_bar(range(max(0, last_epoch), a.training_epochs))
+    else:
+        mb = range(max(0, last_epoch), a.training_epochs)
 
     for epoch in mb:
         if rank == 0:
             start = time.time()
-            mb.write("Epoch: {}".format(epoch+1))
+            mb.write("Epoch: {}".format(epoch + 1))
 
         if h.num_gpus > 1:
             train_sampler.set_epoch(epoch)
 
-        if rank == 0: pb = progress_bar(enumerate(train_loader), total=len(train_loader), parent=mb)
-        else: pb = enumerate(train_loader)
-        
+        if rank == 0:
+            pb = progress_bar(enumerate(train_loader), total=len(train_loader), parent=mb)
+        else:
+            pb = enumerate(train_loader)
 
         for i, batch in pb:
             if rank == 0:
@@ -141,14 +145,15 @@ def train(rank, a, h):
             y = y.to(device, non_blocking=True)
             y_mel = y_mel.to(device, non_blocking=True)
             y = y.unsqueeze(1)
-            
+
             with torch.cuda.amp.autocast(enabled=a.fp16):
                 y_g_hat = generator(x)
                 if USE_ALT_MELCALC:
                     y_g_hat_mel = alt_melspec(y_g_hat.squeeze(1))
                 else:
-                    y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
-                                            h.fmin, h.fmax_for_loss)
+                    y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size,
+                                                  h.win_size,
+                                                  h.fmin, h.fmax_for_loss)
             # print(x.shape, y_g_hat.shape, y_g_hat_mel.shape, y_mel.shape, y.shape)
             optim_d.zero_grad()
 
@@ -163,11 +168,11 @@ def train(rank, a, h):
 
                 loss_disc_all = loss_disc_s + loss_disc_f
 
-            if a.fp16: 
+            if a.fp16:
                 scaler_d.scale(loss_disc_all).backward()
                 scaler_d.step(optim_d)
                 scaler_d.update()
-            else: 
+            else:
                 loss_disc_all.backward()
                 optim_d.step()
 
@@ -200,11 +205,12 @@ def train(rank, a, h):
                     with torch.no_grad():
                         mel_error = F.l1_loss(y_mel, y_g_hat_mel).item()
 
-                    mb.write('Steps : {:,d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, sec/batch : {:4.3f}, peak mem: {:5.2f}GB'. \
-                            format(steps, loss_gen_all, mel_error, time.time() - start_b, torch.cuda.max_memory_allocated()/1e9))
+                    mb.write(
+                        'Steps : {:,d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, sec/batch : {:4.3f}, peak mem: {:5.2f}GB'. \
+                        format(steps, loss_gen_all, mel_error, time.time() - start_b,
+                               torch.cuda.max_memory_allocated() / 1e9))
                     mb.child.comment = "Steps : {:,d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}". \
-                            format(steps, loss_gen_all, mel_error)
-                    
+                        format(steps, loss_gen_all, mel_error)
 
                 # checkpointing
                 if steps % a.checkpoint_interval == 0 and steps != 0:
@@ -212,13 +218,21 @@ def train(rank, a, h):
                     save_checkpoint(checkpoint_path,
                                     {'generator': (generator.module if h.num_gpus > 1 else generator).state_dict()})
                     checkpoint_path = "{}/do_{:08d}.pt".format(a.checkpoint_path, steps)
-                    save_checkpoint(checkpoint_path, 
+                    save_checkpoint(checkpoint_path,
                                     {'mpd': (mpd.module if h.num_gpus > 1
-                                                         else mpd).state_dict(),
+                                             else mpd).state_dict(),
                                      'msd': (msd.module if h.num_gpus > 1
-                                                         else msd).state_dict(),
+                                             else msd).state_dict(),
                                      'optim_g': optim_g.state_dict(), 'optim_d': optim_d.state_dict(), 'steps': steps,
                                      'epoch': epoch})
+                    rm_path = "{}/g_{:08d}.pt".format(a.checkpoint_path, steps - 3 * (a.checkpoint_interval))
+                    if os.path.exists(rm_path):
+                        os.remove(rm_path)
+                        print("removing ", rm_path)
+                    rm_path = "{}/do_{:08d}.pt".format(a.checkpoint_path, steps - 3 * (a.checkpoint_interval))
+                    if os.path.exists(rm_path):
+                        os.remove(rm_path)
+                        print("removing ", rm_path)
 
                 # Tensorboard summary logging
                 if steps % a.summary_interval == 0:
@@ -232,47 +246,50 @@ def train(rank, a, h):
                     torch.cuda.empty_cache()
                     val_err_tot = 0
                     with torch.no_grad():
-                        for j, batch in progress_bar(enumerate(validation_loader), total=len(validation_loader), parent=mb):
+                        for j, batch in progress_bar(enumerate(validation_loader), total=len(validation_loader),
+                                                     parent=mb):
                             x, y, _, y_mel = batch
                             y_g_hat = generator(x.to(device))
                             y_mel = y_mel.to(device, non_blocking=True)
                             if USE_ALT_MELCALC:
                                 y_g_hat_mel = alt_melspec(y_g_hat.squeeze(1))
                                 if y_g_hat_mel.shape[-1] != y_mel.shape[-1]:
-                                    # pad it 
-                                    n_pad = h.hop_size 
-                                    y_g_hat = F.pad(y_g_hat, (n_pad//2, n_pad - n_pad//2))
+                                    # pad it
+                                    n_pad = h.hop_size
+                                    y_g_hat = F.pad(y_g_hat, (n_pad // 2, n_pad - n_pad // 2))
                                     y_g_hat_mel = alt_melspec(y_g_hat.squeeze(1))
                             else:
                                 y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
-                                                            h.hop_size, h.win_size,
-                                                            h.fmin, h.fmax_for_loss)
-                            #print('valid', x.shape, y_g_hat.shape, y_g_hat_mel.shape, y_mel.shape, y.shape)
+                                                              h.hop_size, h.win_size,
+                                                              h.fmin, h.fmax_for_loss)
+                            # print('valid', x.shape, y_g_hat.shape, y_g_hat_mel.shape, y_mel.shape, y.shape)
                             val_err_tot += F.l1_loss(y_mel, y_g_hat_mel).item()
 
                             if j <= 4:
-                                if steps == 0:
-                                    sw.add_audio('gt/y_{}'.format(j), y[0], steps, h.sampling_rate)
-                                    sw.add_figure('gt/y_spec_{}'.format(j), plot_spectrogram(x[0]), steps)
+                                # if steps == 0:
+                                sw.add_audio('gt/y_{}'.format(j), y[0], steps, h.sampling_rate)
+                                sw.add_figure('gt/y_spec_{}'.format(j), plot_spectrogram(x[0]), steps)
 
                                 sw.add_audio('generated/y_hat_{}'.format(j), y_g_hat[0], steps, h.sampling_rate)
                                 if USE_ALT_MELCALC:
                                     y_hat_spec = alt_melspec(y_g_hat.squeeze(1))
                                 else:
-                                    y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
-                                                                h.hop_size, h.win_size,
-                                                                h.fmin, h.fmax_for_loss)
+                                    y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels,
+                                                                 h.sampling_rate,
+                                                                 h.hop_size, h.win_size,
+                                                                 h.fmin, h.fmax_for_loss)
 
                                 sw.add_figure('generated/y_hat_spec_{}'.format(j),
                                               plot_spectrogram(y_hat_spec.squeeze(0).cpu().numpy()), steps)
 
-                        val_err = val_err_tot / (j+1)
+                        val_err = val_err_tot / (j + 1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
-                        mb.write(f"validation run complete at {steps:,d} steps. validation mel spec error: {val_err:5.4f}")
+                        mb.write(
+                            f"validation run complete at {steps:,d} steps. validation mel spec error: {val_err:5.4f}")
 
                     generator.train()
-                    sw.add_scalar("memory/max_allocated_gb", torch.cuda.max_memory_allocated()/1e9, steps)
-                    sw.add_scalar("memory/max_reserved_gb", torch.cuda.max_memory_reserved()/1e9, steps)
+                    sw.add_scalar("memory/max_allocated_gb", torch.cuda.max_memory_allocated() / 1e9, steps)
+                    sw.add_scalar("memory/max_reserved_gb", torch.cuda.max_memory_reserved() / 1e9, steps)
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.reset_accumulated_memory_stats()
 
@@ -280,7 +297,7 @@ def train(rank, a, h):
 
         scheduler_g.step()
         scheduler_d.step()
-        
+
         if rank == 0:
             print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(time.time() - start)))
 

@@ -1,3 +1,7 @@
+import librosa
+
+import yingram
+
 dependencies = ['torch', 'torchaudio', 'numpy']
 
 import torch
@@ -26,6 +30,43 @@ def get_hubert_model():
     model.eval()
     return model
 
+
+def get_hubert_content(hmodel, wav_16k_tensor):
+    feats = wav_16k_tensor
+    if feats.dim() == 2:  # double channels
+        feats = feats.mean(-1)
+    assert feats.dim() == 1, feats.dim()
+    feats = feats.view(1, -1)
+    padding_mask = torch.BoolTensor(feats.shape).fill_(False)
+    inputs = {
+        "source": feats.to(wav_16k_tensor.device),
+        "padding_mask": padding_mask.to(wav_16k_tensor.device),
+        "output_layer": 9,  # layer 9
+    }
+    with torch.no_grad():
+        logits = hmodel.extract_features(**inputs)
+        feats = hmodel.final_proj(logits[0])
+    return feats.transpose(1, 2)
+
+@torch.inference_mode()
+def get_full_features(path, hmodel, device, shift):
+
+    x, sr = librosa.load(path, sr=16000)
+    x = torch.FloatTensor(x).to(device)
+
+    assert sr == 16000
+    n_pad = 320 - (x.shape[-1] % 320)
+    x = F.pad(x, (0, n_pad), value=0)
+    features = get_hubert_content(hmodel, x).transpose(1, 2).squeeze(0)
+    out_feats = features.cpu()
+
+    gram = yingram.calc_yingram(path, shift=shift)
+    assert abs(out_feats.shape[0] - gram.shape[0]) < 3
+    l = min(out_feats.shape[0], gram.shape[0])
+    out_feats = out_feats[:l, :]
+    gram = gram[:l, :]
+    out_feats = torch.cat((out_feats, gram), dim=1)
+    return out_feats
 
 
 def knn_vc(pretrained=True, progress=True, prematched=True, device='cuda', model_path=None) -> KNN_VC:

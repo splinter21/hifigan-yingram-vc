@@ -89,7 +89,7 @@ def hifigan_wavlm(pretrained=True, progress=True, prematched=True, device='cuda'
 
     generator = HiFiGAN(h).to(device)
 
-    state_dict_g = torch.load(model_path)
+    state_dict_g = torch.load(model_path,device)
     generator.load_state_dict(state_dict_g['generator'])
     generator.eval()
     generator.remove_weight_norm()

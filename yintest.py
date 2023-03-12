@@ -15,25 +15,4 @@ def plot_yingram(path ,shift):
     plt.show()
 
 
-
-
-
-
-# plot_yingram("/Users/xingyijin/Documents/individualAudio.wav", 0)
-# plot_yingram("kkk.wav", 0)
-# plot_yingram("kkk.wav", 9)
-# plot_yingram("testwav.wav", 0)
-# plot_yingram("/Volumes/Extend/下载/yintest.flac", -15)
 plot_yingram("/Volumes/Extend/下载/asdasd.wav", 0)
-# plot_yingram("/Volumes/Extend/下载/yintest-11.flac", 0)
-# plot_yingram("/Volumes/Extend/下载/yintest-11.flac", -11)
-
-# sp_gram = sample_yingram(x, torch.LongTensor([-12]), True).squeeze(0)
-#
-# plt.imshow(sp_gram,origin='lower')
-# plt.show()
-#
-# sp_gram = sample_yingram(x, torch.LongTensor([12]), True).squeeze(0)
-#
-# plt.imshow(sp_gram,origin='lower')
-# plt.show()
